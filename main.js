@@ -29,12 +29,19 @@ function loadProfiles() {
   try {
     const raw = fs.readFileSync(profilesPath, 'utf-8');
     const parsed = JSON.parse(raw);
+    vpnStatus.clear();
     profiles = Array.isArray(parsed)
-      ? parsed.map((profile) => ({
-          id: profile.id || generateProfileId(),
-          name: profile.name,
-          configPath: profile.configPath,
-        }))
+      ? parsed.map((profile) => {
+          const id = profile.id || generateProfileId();
+          const status = profile.status || 'disconnected';
+          vpnStatus.set(id, status);
+          return {
+            id,
+            name: profile.name,
+            configPath: profile.configPath,
+            status,
+          };
+        })
       : [];
     const shouldPersistIds = Array.isArray(parsed) && parsed.some((profile) => !profile.id);
     if (shouldPersistIds) {
@@ -52,7 +59,9 @@ function saveProfiles() {
 
 function initializeVpnStatus() {
   profiles.forEach((profile) => {
-    vpnStatus.set(profile.id, 'disconnected');
+    if (!vpnStatus.has(profile.id)) {
+      vpnStatus.set(profile.id, profile.status || 'disconnected');
+    }
   });
 }
 
@@ -175,17 +184,23 @@ ipcMain.handle('profiles:list', async () => {
 });
 
 ipcMain.handle('profiles:add', async (_event, profile) => {
-  if (!profile || !profile.name || !profile.configPath) {
+  const name = profile?.name?.trim();
+  const configPath = profile?.configPath?.trim();
+
+  if (!name || !configPath) {
     dialog.showErrorBox('Profil invalide', 'Le nom et le chemin du fichier .conf sont requis.');
     return getProfilesWithId();
   }
 
-  profiles.push({
+  const newProfile = {
     id: generateProfileId(),
-    name: profile.name,
-    configPath: profile.configPath,
-  });
-  setVpnStatus(profiles[profiles.length - 1].id, 'disconnected');
+    name,
+    configPath,
+    status: 'disconnected',
+  };
+
+  profiles.push(newProfile);
+  vpnStatus.set(newProfile.id, 'disconnected');
   saveProfiles();
   return getProfilesWithId();
 });

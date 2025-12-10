@@ -502,9 +502,12 @@
       const configPath = document.getElementById('config-path').value.trim();
       if (!name || !configPath) return;
 
-      await window.vpnApi.addProfile({ name, configPath });
+      const updatedProfiles = await window.vpnApi.addProfile({ name, configPath });
+      const status = await window.vpnApi.getStatus();
+      currentProfiles = updatedProfiles || [];
+      currentStatus = status || {};
+      renderProfiles(currentProfiles);
       profileForm.reset();
-      refreshProfiles();
     });
 
     resetFormBtn.addEventListener('click', () => {

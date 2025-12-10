@@ -7,10 +7,15 @@ const profilesPath = path.join(__dirname, 'profiles.json');
 let profiles = [];
 const connectionProcesses = new Map();
 
+function generateProfileId() {
+  return `profile-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
 function ensureProfilesFile() {
   if (!fs.existsSync(profilesPath)) {
     const defaultProfiles = [
       {
+        id: generateProfileId(),
         name: 'Serveur Maison',
         configPath: 'C\\\\vpn\\\\maison.conf',
         status: 'disconnected',
@@ -26,11 +31,16 @@ function loadProfiles() {
     const parsed = JSON.parse(raw);
     profiles = Array.isArray(parsed)
       ? parsed.map((profile) => ({
+          id: profile.id || generateProfileId(),
           name: profile.name,
           configPath: profile.configPath,
           status: profile.status || 'disconnected',
         }))
       : [];
+    const shouldPersistIds = Array.isArray(parsed) && parsed.some((profile) => !profile.id);
+    if (shouldPersistIds) {
+      saveProfiles();
+    }
   } catch (error) {
     console.error('Erreur lors du chargement des profils', error);
     profiles = [];
@@ -42,18 +52,24 @@ function saveProfiles() {
 }
 
 function getProfilesWithId() {
-  return profiles.map((profile, index) => ({ id: index, ...profile }));
+  return profiles.map((profile) => ({ ...profile }));
 }
 
-function updateProfileStatus(index, status) {
-  if (profiles[index]) {
+function findProfileIndex(profileId) {
+  return profiles.findIndex((profile) => profile.id === profileId);
+}
+
+function updateProfileStatus(profileId, status) {
+  const index = findProfileIndex(profileId);
+  if (index !== -1) {
     profiles[index].status = status;
     saveProfiles();
   }
 }
 
 function runWgQuick(action, profileId) {
-  const profile = profiles[profileId];
+  const profileIndex = findProfileIndex(profileId);
+  const profile = profiles[profileIndex];
   if (!profile) {
     return Promise.resolve({ success: false, message: 'Profil introuvable' });
   }
@@ -143,10 +159,28 @@ ipcMain.handle('profiles:add', async (_event, profile) => {
   }
 
   profiles.push({
+    id: generateProfileId(),
     name: profile.name,
     configPath: profile.configPath,
     status: 'disconnected',
   });
+  saveProfiles();
+  return getProfilesWithId();
+});
+
+ipcMain.handle('profiles:delete', async (_event, profileId) => {
+  const index = findProfileIndex(profileId);
+  if (index === -1) {
+    return getProfilesWithId();
+  }
+
+  const process = connectionProcesses.get(profileId);
+  if (process) {
+    process.kill();
+    connectionProcesses.delete(profileId);
+  }
+
+  profiles.splice(index, 1);
   saveProfiles();
   return getProfilesWithId();
 });
@@ -156,7 +190,8 @@ ipcMain.handle('vpn:getStatus', async () => {
 });
 
 ipcMain.handle('vpn:connect', async (_event, profileId) => {
-  const profile = profiles[profileId];
+  const profileIndex = findProfileIndex(profileId);
+  const profile = profiles[profileIndex];
   if (!profile) {
     return { success: false, message: 'Profil introuvable' };
   }
@@ -171,7 +206,8 @@ ipcMain.handle('vpn:connect', async (_event, profileId) => {
 });
 
 ipcMain.handle('vpn:disconnect', async (_event, profileId) => {
-  const profile = profiles[profileId];
+  const profileIndex = findProfileIndex(profileId);
+  const profile = profiles[profileIndex];
   if (!profile) {
     return { success: false, message: 'Profil introuvable' };
   }

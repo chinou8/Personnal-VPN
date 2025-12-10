@@ -305,7 +305,6 @@
 
     .status.disconnected { background: #e2e8f0; color: #0f172a; }
     .status.connecting { background: #fff3cd; color: #92400e; }
-    .status.disconnecting { background: #fef3c7; color: #92400e; }
     .status.connected { background: #dcfce7; color: #166534; }
     .status.error { background: #fee2e2; color: #991b1b; }
 
@@ -371,10 +370,10 @@
         <div class="profiles-header">
           <div>
             <h2>Profils configurés</h2>
-            <p class="description">Liste des configurations prêtes à être utilisées. Connexion/déconnexion sera activée plus tard si nécessaire.</p>
+            <p class="description">Liste des configurations prêtes à être utilisées. Lancez ou arrêtez la connexion WireGuard directement depuis cette liste.</p>
           </div>
         </div>
-        <p class="hint">Chaque profil affiche son état actuel. Utilisez les actions pour tester la connexion ou la déconnexion.</p>
+        <p class="hint">Chaque profil affiche son état actuel. Utilisez les actions pour lancer ou arrêter le tunnel WireGuard.</p>
         <div id="profiles" class="profiles-list"></div>
       </section>
     </main>
@@ -386,6 +385,8 @@
     const resetFormBtn = document.getElementById('reset-form');
     const profileCount = document.getElementById('profile-count');
     const themeToggleBtn = document.getElementById('theme-toggle');
+    let currentProfiles = [];
+    let currentStatus = {};
 
     function updateThemeToggleLabel(theme) {
       if (!themeToggleBtn) return;
@@ -414,8 +415,6 @@
           return 'Connecté';
         case 'connecting':
           return 'Connexion en cours';
-        case 'disconnecting':
-          return 'Déconnexion en cours';
         case 'error':
           return 'Erreur';
         default:
@@ -433,6 +432,7 @@
       }
 
       profiles.forEach((profile) => {
+        const status = currentStatus[profile.id] || 'disconnected';
         const card = document.createElement('div');
         card.className = 'profile-card';
 
@@ -440,27 +440,33 @@
         info.innerHTML = `
           <h3 class="profile-title">${profile.name}</h3>
           <p class="profile-path">${profile.configPath}</p>
-          <span class="status ${profile.status}">${getStatusLabel(profile.status)}</span>
+          <span class="status ${status}">${getStatusLabel(status)}</span>
         `;
 
         const actionContainer = document.createElement('div');
         actionContainer.className = 'profile-actions';
 
         const actionButton = document.createElement('button');
-        const isConnected = profile.status === 'connected';
-        const isBusy = profile.status === 'connecting' || profile.status === 'disconnecting';
+        const isConnected = status === 'connected';
+        const isBusy = status === 'connecting';
+        const shouldConnect = status === 'disconnected' || status === 'error';
 
-        actionButton.textContent = isConnected ? 'Se déconnecter' : 'Se connecter';
-        actionButton.className = isConnected ? 'secondary' : 'primary';
+        actionButton.textContent = shouldConnect ? 'Se connecter' : 'Se déconnecter';
+        actionButton.className = shouldConnect ? 'primary' : 'secondary';
         actionButton.disabled = isBusy;
         actionButton.addEventListener('click', async () => {
           actionButton.disabled = true;
-          if (isConnected) {
-            await window.vpnApi.disconnect(profile.id);
+          let result;
+          if (shouldConnect) {
+            result = await window.vpnApi.connect(profile.id);
           } else {
-            await window.vpnApi.connect(profile.id);
+            result = await window.vpnApi.disconnect(profile.id);
           }
-          refreshProfiles();
+          if (result && result.success === false && result.message) {
+            alert(result.message);
+          }
+          await pollStatus();
+          actionButton.disabled = false;
         });
 
         const deleteButton = document.createElement('button');
@@ -470,8 +476,8 @@
         deleteButton.addEventListener('click', async () => {
           const confirmed = confirm('Supprimer ce profil ?');
           if (!confirmed) return;
-          const updatedProfiles = await window.vpnApi.deleteProfile(profile.id);
-          renderProfiles(updatedProfiles);
+          await window.vpnApi.deleteProfile(profile.id);
+          await refreshProfiles();
         });
 
         actionContainer.appendChild(actionButton);
@@ -484,7 +490,10 @@
 
     async function refreshProfiles() {
       const profiles = await window.vpnApi.listProfiles();
-      renderProfiles(profiles);
+      const status = await window.vpnApi.getStatus();
+      currentProfiles = profiles;
+      currentStatus = status || {};
+      renderProfiles(currentProfiles);
     }
 
     profileForm.addEventListener('submit', async (event) => {
@@ -504,8 +513,9 @@
     });
 
     async function pollStatus() {
-      const profiles = await window.vpnApi.getStatus();
-      renderProfiles(profiles);
+      const status = await window.vpnApi.getStatus();
+      currentStatus = status || {};
+      renderProfiles(currentProfiles);
     }
 
     document.addEventListener('DOMContentLoaded', () => {

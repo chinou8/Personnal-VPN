@@ -7,6 +7,20 @@ const profilesPath = path.join(__dirname, 'profiles.json');
 let profiles = [];
 const connectionProcesses = new Map();
 const vpnStatus = new Map();
+const logs = [];
+const MAX_LOGS = 200;
+
+function addLog(level, message) {
+  logs.push({
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+  });
+
+  if (logs.length > MAX_LOGS) {
+    logs.splice(0, logs.length - MAX_LOGS);
+  }
+}
 
 function generateProfileId() {
   return `profile-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -33,7 +47,7 @@ function loadProfiles() {
     profiles = Array.isArray(parsed)
       ? parsed.map((profile) => {
           const id = profile.id || generateProfileId();
-          const status = profile.status || 'disconnected';
+          const status = 'disconnected';
           vpnStatus.set(id, status);
           return {
             id,
@@ -43,7 +57,7 @@ function loadProfiles() {
           };
         })
       : [];
-    const shouldPersistIds = Array.isArray(parsed) && parsed.some((profile) => !profile.id);
+    const shouldPersistIds = Array.isArray(parsed) && parsed.some((profile) => !profile.id || profile.status !== 'disconnected');
     if (shouldPersistIds) {
       saveProfiles();
     }
@@ -85,45 +99,75 @@ function setVpnStatus(profileId, status) {
   }
 }
 
-function runWgQuick(action, profileId) {
-  const profileIndex = findProfileIndex(profileId);
-  const profile = profiles[profileIndex];
+function runWgQuick(action, profile) {
   if (!profile) {
-    return Promise.resolve({ success: false, message: 'Profil introuvable' });
+    return Promise.resolve({ ok: false, message: 'Profil introuvable', status: 'error' });
   }
 
   return new Promise((resolve) => {
     const processOutput = [];
+    const profileLabel = profile.name || profile.id;
     const command = spawn('wg-quick', [action, profile.configPath]);
-    connectionProcesses.set(profileId, command);
+    const TIMEOUT_MS = 25000;
+    let timedOut = false;
+    let resolved = false;
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      command.kill();
+    }, TIMEOUT_MS);
+
+    connectionProcesses.set(profile.id, command);
 
     command.stdout?.on('data', (data) => processOutput.push(data.toString()));
     command.stderr?.on('data', (data) => processOutput.push(data.toString()));
 
     command.on('error', (err) => {
-      connectionProcesses.delete(profileId);
-      setVpnStatus(profileId, 'error');
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      connectionProcesses.delete(profile.id);
+      setVpnStatus(profile.id, 'error');
       if (err.code === 'ENOENT') {
-        resolve({
-          success: false,
-          message:
-            "La commande wg-quick est introuvable. Vérifiez que WireGuard est installé et accessible dans le PATH Windows.",
-        });
+        const message =
+          'La commande wg-quick est introuvable. Vérifie que WireGuard est installé et accessible dans le PATH.';
+        addLog('error', `${message} (${profileLabel})`);
+        resolve({ ok: false, message, status: 'error' });
         return;
       }
-      resolve({ success: false, message: err.message });
+      const message = `Erreur lors de l\'exécution de wg-quick : ${err.message}`;
+      addLog('error', message);
+      resolve({ ok: false, message, status: 'error' });
     });
 
     command.on('close', (code) => {
-      connectionProcesses.delete(profileId);
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      connectionProcesses.delete(profile.id);
+
+      if (timedOut) {
+        const message = 'La connexion a expiré (timeout).';
+        setVpnStatus(profile.id, 'error');
+        addLog('error', `${message} (${profileLabel})`);
+        resolve({ ok: false, message, status: 'error' });
+        return;
+      }
+
       if (code === 0) {
         const newStatus = action === 'up' ? 'connected' : 'disconnected';
-        setVpnStatus(profileId, newStatus);
-        resolve({ success: true });
+        setVpnStatus(profile.id, newStatus);
+        const message = action === 'up'
+          ? `Connexion réussie pour ${profileLabel}.`
+          : `Déconnexion réussie pour ${profileLabel}.`;
+        addLog('info', message);
+        resolve({ ok: true, message, status: newStatus });
       } else {
-        setVpnStatus(profileId, 'error');
+        setVpnStatus(profile.id, 'error');
         const output = processOutput.join('\n').trim();
-        resolve({ success: false, message: output || `wg-quick a retourné le code ${code}` });
+        const message = output || `wg-quick a retourné le code ${code}`;
+        addLog('error', `Échec wg-quick (${action}) pour ${profileLabel} : ${message}`);
+        resolve({ ok: false, message, status: 'error' });
       }
     });
   });
@@ -235,40 +279,53 @@ ipcMain.handle('vpn:connect', async (_event, profileId) => {
   const profileIndex = findProfileIndex(profileId);
   const profile = profiles[profileIndex];
   if (!profile) {
-    return { success: false, message: 'Profil introuvable' };
+    return { ok: false, message: 'Profil introuvable', status: 'error' };
   }
   if (connectionProcesses.has(profileId)) {
-    return { success: false, message: 'Une opération est déjà en cours pour ce profil' };
+    return { ok: false, message: 'Une opération est déjà en cours pour ce profil', status: vpnStatus.get(profileId) };
   }
   if (!profile.configPath) {
-    return { success: false, message: 'Le profil ne contient pas de chemin de configuration WireGuard.' };
+    return { ok: false, message: 'Le profil ne contient pas de chemin de configuration WireGuard.', status: 'error' };
   }
   const currentStatus = vpnStatus.get(profileId) || 'disconnected';
   if (currentStatus === 'connected' || currentStatus === 'connecting') {
-    return { success: false, message: 'Le profil est déjà connecté ou en cours de connexion' };
+    return { ok: false, message: 'Ce profil est déjà connecté ou en cours de connexion.', status: currentStatus };
   }
+
   setVpnStatus(profileId, 'connecting');
-  return runWgQuick('up', profileId);
+  addLog('info', `Tentative de connexion du profil ${profile.name}...`);
+  const result = await runWgQuick('up', profile);
+  return result;
 });
 
 ipcMain.handle('vpn:disconnect', async (_event, profileId) => {
   const profileIndex = findProfileIndex(profileId);
   const profile = profiles[profileIndex];
   if (!profile) {
-    return { success: false, message: 'Profil introuvable' };
+    return { ok: false, message: 'Profil introuvable', status: 'error' };
   }
   if (connectionProcesses.has(profileId)) {
-    return { success: false, message: 'Une opération est déjà en cours pour ce profil' };
+    return { ok: false, message: 'Une opération est déjà en cours pour ce profil', status: vpnStatus.get(profileId) };
   }
   if (!profile.configPath) {
-    return { success: false, message: 'Le profil ne contient pas de chemin de configuration WireGuard.' };
+    return { ok: false, message: 'Le profil ne contient pas de chemin de configuration WireGuard.', status: 'error' };
   }
   const currentStatus = vpnStatus.get(profileId) || 'disconnected';
-  if (currentStatus === 'disconnected') {
-    return { success: false, message: 'Le profil est déjà déconnecté' };
+  if (currentStatus !== 'connected') {
+    return { ok: false, message: "Ce profil n'est pas connecté.", status: currentStatus };
   }
+
   setVpnStatus(profileId, 'connecting');
-  return runWgQuick('down', profileId);
+  addLog('info', `Tentative de déconnexion du profil ${profile.name}...`);
+  const result = await runWgQuick('down', profile);
+  return result;
+});
+
+ipcMain.handle('vpn:getLogs', async () => logs);
+
+ipcMain.handle('vpn:clearLogs', async () => {
+  logs.length = 0;
+  return logs;
 });
 
 app.whenReady().then(() => {

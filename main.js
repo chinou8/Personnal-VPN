@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -96,6 +96,42 @@ function createWindow() {
   mainWindow.loadFile('index.html');
 }
 
+function createAppMenu() {
+  const template = [
+    {
+      label: 'Fichier',
+      submenu: [
+        { role: 'reload', label: 'Recharger' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Quitter' },
+      ],
+    },
+    {
+      label: 'Affichage',
+      submenu: [{ role: 'toggleDevTools', label: 'Outils de développement' }],
+    },
+    {
+      label: 'Aide',
+      submenu: [
+        {
+          label: 'À propos de Personnal-VPN',
+          click: () => {
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'À propos',
+              message: 'Personnal-VPN',
+              detail:
+                'Personnal-VPN est un client VPN personnel construit avec Electron et piloté par WireGuard pour des connexions sécurisées.',
+            });
+          },
+        },
+      ],
+    },
+  ];
+
+  return Menu.buildFromTemplate(template);
+}
+
 ipcMain.handle('profiles:list', async () => {
   return getProfilesWithId();
 });
@@ -152,6 +188,7 @@ ipcMain.handle('vpn:disconnect', async (_event, profileId) => {
 app.whenReady().then(() => {
   ensureProfilesFile();
   loadProfiles();
+  Menu.setApplicationMenu(createAppMenu());
   createWindow();
 
   app.on('activate', () => {

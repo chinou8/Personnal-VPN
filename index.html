@@ -316,6 +316,62 @@
       justify-content: flex-end;
     }
 
+    .logs-panel {
+      margin-top: 18px;
+    }
+
+    .logs-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .logs-list {
+      margin-top: 12px;
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      background: var(--card-background);
+      max-height: 260px;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .log-entry {
+      font-size: 13px;
+      color: var(--text-primary);
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--panel-border);
+      background: var(--panel-background);
+    }
+
+    .log-entry .time {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      color: var(--hint-color);
+      margin-right: 6px;
+    }
+
+    .log-entry .level {
+      text-transform: uppercase;
+      font-weight: 800;
+      margin-right: 8px;
+      font-size: 11px;
+    }
+
+    .log-entry .level.info { color: #0ea5e9; }
+    .log-entry .level.error { color: #ef4444; }
+
+    .logs-empty {
+      text-align: center;
+      color: var(--hint-color);
+      padding: 12px;
+    }
+
     .empty-state {
       padding: 18px;
       text-align: center;
@@ -377,6 +433,20 @@
         <div id="profiles" class="profiles-list"></div>
       </section>
     </main>
+
+    <section class="panel logs-panel">
+      <div class="logs-header">
+        <div>
+          <h2>Journal des événements</h2>
+          <p class="description">Suivez les commandes WireGuard et les messages de connexion/déconnexion.</p>
+        </div>
+        <div class="actions">
+          <button id="refresh-logs" class="secondary">Rafraîchir le journal</button>
+          <button id="clear-logs" class="ghost">Effacer le journal</button>
+        </div>
+      </div>
+      <div id="logs" class="logs-list"></div>
+    </section>
   </div>
 
   <script>
@@ -385,8 +455,12 @@
     const resetFormBtn = document.getElementById('reset-form');
     const profileCount = document.getElementById('profile-count');
     const themeToggleBtn = document.getElementById('theme-toggle');
+    const logsContainer = document.getElementById('logs');
+    const refreshLogsBtn = document.getElementById('refresh-logs');
+    const clearLogsBtn = document.getElementById('clear-logs');
     let currentProfiles = [];
     let currentStatus = {};
+    let currentLogs = [];
 
     function updateThemeToggleLabel(theme) {
       if (!themeToggleBtn) return;
@@ -408,6 +482,47 @@
       const nextTheme = activeTheme === 'dark' ? 'light' : 'dark';
       setTheme(nextTheme);
     });
+
+    function formatLogTime(timestamp) {
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString('fr-FR', { hour12: false });
+    }
+
+    function renderLogs(logs) {
+      if (!logsContainer) return;
+
+      logsContainer.innerHTML = '';
+      if (!logs || !logs.length) {
+        logsContainer.innerHTML = '<div class="logs-empty">Aucune entrée pour le moment.</div>';
+        return;
+      }
+
+      logs
+        .slice()
+        .reverse()
+        .forEach((log) => {
+          const item = document.createElement('div');
+          item.className = 'log-entry';
+          item.innerHTML = `
+            <span class="time">[${formatLogTime(log.timestamp)}]</span>
+            <span class="level ${log.level}">[${log.level}]</span>
+            <span class="message">${log.message}</span>
+          `;
+          logsContainer.appendChild(item);
+        });
+    }
+
+    async function refreshLogs() {
+      const logs = await window.vpnApi.getLogs();
+      currentLogs = logs || [];
+      renderLogs(currentLogs);
+    }
+
+    async function clearLogs() {
+      await window.vpnApi.clearLogs();
+      currentLogs = [];
+      renderLogs(currentLogs);
+    }
 
     function getStatusLabel(status) {
       switch (status) {
@@ -447,7 +562,6 @@
         actionContainer.className = 'profile-actions';
 
         const actionButton = document.createElement('button');
-        const isConnected = status === 'connected';
         const isBusy = status === 'connecting';
         const shouldConnect = status === 'disconnected' || status === 'error';
 
@@ -462,10 +576,12 @@
           } else {
             result = await window.vpnApi.disconnect(profile.id);
           }
-          if (result && result.success === false && result.message) {
+          const isOk = result?.ok ?? result?.success ?? false;
+          if (!isOk && result?.message) {
             alert(result.message);
           }
           await pollStatus();
+          await refreshLogs();
           actionButton.disabled = false;
         });
 
@@ -521,8 +637,17 @@
       renderProfiles(currentProfiles);
     }
 
+    refreshLogsBtn?.addEventListener('click', () => {
+      refreshLogs();
+    });
+
+    clearLogsBtn?.addEventListener('click', () => {
+      clearLogs();
+    });
+
     document.addEventListener('DOMContentLoaded', () => {
       refreshProfiles();
+      refreshLogs();
       setInterval(pollStatus, 5000);
     });
   </script>

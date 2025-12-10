@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld('vpnApi', {
   connect: (profileId) => ipcRenderer.invoke('vpn:connect', profileId),
   disconnect: (profileId) => ipcRenderer.invoke('vpn:disconnect', profileId),
   getStatus: () => ipcRenderer.invoke('vpn:getStatus'),
+  getLogs: () => ipcRenderer.invoke('vpn:getLogs'),
+  clearLogs: () => ipcRenderer.invoke('vpn:clearLogs'),
 });

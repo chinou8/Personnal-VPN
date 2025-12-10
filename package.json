@@ -1,0 +1,14 @@
+{
+  "name": "personnal-vpn",
+  "version": "1.0.0",
+  "description": "Client Electron pour piloter WireGuard sur Windows",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}

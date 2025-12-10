@@ -519,8 +519,8 @@
     }
 
     async function clearLogs() {
-      await window.vpnApi.clearLogs();
-      currentLogs = [];
+      const clearedLogs = await window.vpnApi.clearLogs();
+      currentLogs = clearedLogs || [];
       renderLogs(currentLogs);
     }
 
@@ -618,11 +618,8 @@
       const configPath = document.getElementById('config-path').value.trim();
       if (!name || !configPath) return;
 
-      const updatedProfiles = await window.vpnApi.addProfile({ name, configPath });
-      const status = await window.vpnApi.getStatus();
-      currentProfiles = updatedProfiles || [];
-      currentStatus = status || {};
-      renderProfiles(currentProfiles);
+      await window.vpnApi.addProfile({ name, configPath });
+      await refreshProfiles();
       profileForm.reset();
     });
 
@@ -637,9 +634,7 @@
       renderProfiles(currentProfiles);
     }
 
-    refreshLogsBtn?.addEventListener('click', () => {
-      refreshLogs();
-    });
+    refreshLogsBtn?.addEventListener('click', refreshLogs);
 
     clearLogsBtn?.addEventListener('click', () => {
       clearLogs();

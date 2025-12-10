@@ -321,7 +321,10 @@ ipcMain.handle('vpn:disconnect', async (_event, profileId) => {
   return result;
 });
 
-ipcMain.handle('vpn:getLogs', async () => logs);
+ipcMain.handle('vpn:getLogs', async () => {
+  addLog('info', "Rafraîchissement du journal demandé par l'utilisateur.");
+  return logs;
+});
 
 ipcMain.handle('vpn:clearLogs', async () => {
   logs.length = 0;

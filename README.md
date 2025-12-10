@@ -27,3 +27,8 @@ npm start
 1. Cliquez sur "Ajouter un profil" dans l'application.
 2. Saisissez le nom du profil et le chemin complet du fichier `.conf` WireGuard (ex: `C:\\vpn\\maison.conf`).
 3. Validez : le profil apparaît dans la liste et peut être connecté via le bouton "Se connecter".
+
+## Interface utilisateur
+- Menu d'application en français (Fichier, Affichage, Aide) avec une fenêtre À propos.
+- Panneau d'ajout de profil dédié pour saisir le nom et le chemin du fichier `.conf`.
+- Liste des profils configurés avec affichage du statut (Déconnecté, Connexion en cours, Connecté, Erreur) et compteur de profils.
